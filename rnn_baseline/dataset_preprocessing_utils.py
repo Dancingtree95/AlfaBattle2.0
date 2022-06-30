@@ -96,7 +96,7 @@ def create_buckets_from_transactions(path_to_dataset, save_to_path, frame_with_i
         
         for dense_col in ['amnt', 'days_before', 'hour_diff']:
             transactions_frame[dense_col] = np.digitize(transactions_frame[dense_col], bins=dense_features_buckets[dense_col])
-        prepero_maxima(transactions_frame, embedding_projections)
+         df_memory_optimize(transactions_frame, embedding_projections)
             
         seq = transform_transactions_to_sequences(transactions_frame)
         seq['sequence_length'] = seq.sequences.apply(lambda x: len(x[1]))
