@@ -30,34 +30,18 @@ embedding_projection = {'currency': (11, 6),
 
 
 def pad_sequence(array, max_len) -> np.array:
-    """
-    принимает список списков (array) и делает padding каждого вложенного списка до max_len
-    :param array: список списков
-    :param max_len: максимальная длина до которой нужно сделать padding
-    :return: np.array после padding каждого вложенного списка до одинаковой длины
-    """
     add_zeros = max_len - len(array[0])
-    return np.array([list(x) + [0] * add_zeros for x in array])
+    paded = np.empty(len(array), object)
+    paded[:] = [np.concatenate([x, np.array([0]*add_zeros, dtype = x.dtype)]) for x in array]
+    return paded
 
 
 def truncate(x, num_last_transactions=750):
-    return x.values.transpose()[:, -num_last_transactions:].tolist()
+    return [x[col].values[-num_last_transactions:] for col in x.columns]
 
 
 def transform_transactions_to_sequences(transactions_frame: pd.DataFrame,
                                         num_last_transactions=750) -> pd.DataFrame:
-    """
-    принимает frame с транзакциями клиентов, сортирует транзакции по клиентам
-    (внутри клиента сортирует транзакции по возрастанию), берет num_last_transactions танзакций,
-    возвращает новый pd.DataFrame с двумя колонками: app_id и sequences.
-    каждое значение в колонке sequences - это список списков.
-    каждый список - значение одного конкретного признака во всех клиентских транзакциях.
-    Всего признаков len(features), поэтому будет len(features) списков.
-    Данная функция крайне полезна для подготовки датасета для работы с нейронными сетями.
-    :param transactions_frame: фрейм с транзакциями клиентов
-    :param num_last_transactions: количество транзакций клиента, которые будут рассмотрены
-    :return: pd.DataFrame из двух колонок (app_id, sequences)
-    """
     return transactions_frame \
         .sort_values(['app_id', 'transaction_number']) \
         .groupby(['app_id'])[features] \
@@ -65,22 +49,10 @@ def transform_transactions_to_sequences(transactions_frame: pd.DataFrame,
         .reset_index().rename(columns={0: 'sequences'})
 
 
+
 def create_padded_buckets(frame_of_sequences: pd.DataFrame, bucket_info: Dict[int, int],
                           save_to_file_path=None, has_target=True):
-    """
-    Функция реализует sequence_bucketing технику для обучения нейронных сетей.
-    Принимает на вход frame_of_sequences (результат работы функции transform_transactions_to_sequences),
-    словарь bucket_info, где для последовательности каждой длины указано, до какой максимальной длины нужно делать
-    padding, далее группирует транзакции по бакетам (на основе длины), делает padding транзакций и сохраняет результат
-    в pickle файл, если нужно
-    :param frame_of_sequences: pd.DataFrame c транзакциями (результат применения transform_transactions_to_sequences)
-    :param bucket_info: словарь, где для последовательности каждой длины указано, до какой максимальной длины нужно делать
-    padding
-    :param save_to_file_path: опциональный путь до файла, куда нужно сохранить результат
-    :param has_target: флаг, есть ли в frame_of_sequences целевая переменная или нет. Если есть, то
-    будет записано в результат
-    :return: возвращает словарь с следюущими ключами (padded_sequences, targets, app_id, products)
-    """
+    
     frame_of_sequences['bucket_idx'] = frame_of_sequences.sequence_length.map(bucket_info)
     padded_seq = []
     targets = []
@@ -89,7 +61,7 @@ def create_padded_buckets(frame_of_sequences: pd.DataFrame, bucket_info: Dict[in
 
     for size, bucket in tqdm(frame_of_sequences.groupby('bucket_idx'), desc='Extracting buckets'):
         padded_sequences = bucket.sequences.apply(lambda x: pad_sequence(x, size)).values
-        padded_sequences = np.array([np.array(x) for x in padded_sequences])
+        #padded_sequences = np.array([np.array(x) for x in padded_sequences])
         padded_seq.append(padded_sequences)
 
         if has_target:
@@ -111,3 +83,36 @@ def create_padded_buckets(frame_of_sequences: pd.DataFrame, bucket_info: Dict[in
         with open(save_to_file_path, 'wb') as f:
             pickle.dump(dict_result, f)
     return dict_result
+
+
+def create_buckets_from_transactions(path_to_dataset, save_to_path, frame_with_ids = None, 
+                                     num_parts_to_preprocess_at_once: int = 1, 
+                                     num_parts_total=50, has_target=False):
+    block = 0
+    for step in tqdm(range(0, num_parts_total, num_parts_to_preprocess_at_once), 
+                                   desc="Transforming transactions data"):
+        transactions_frame = read_parquet_dataset_from_local(path_to_dataset, step, num_parts_to_preprocess_at_once, 
+                                                             verbose=True)
+        
+        for dense_col in ['amnt', 'days_before', 'hour_diff']:
+            transactions_frame[dense_col] = np.digitize(transactions_frame[dense_col], bins=dense_features_buckets[dense_col])
+        prepero_maxima(transactions_frame, embedding_projections)
+            
+        seq = transform_transactions_to_sequences(transactions_frame)
+        seq['sequence_length'] = seq.sequences.apply(lambda x: len(x[1]))
+        
+        if frame_with_ids is not None:
+            seq = seq.merge(frame_with_ids, on='app_id')
+
+        block_as_str = str(block)
+        if len(block_as_str) == 1:
+            block_as_str = '00' + block_as_str
+        else:
+            block_as_str = '0' + block_as_str
+            
+        processed_fragment =  create_padded_buckets(seq, mapping_seq_len_to_padded_len, has_target=has_target, 
+                                                    save_to_file_path=os.path.join(save_to_path, 
+                                                                                   f'processed_chunk_{block_as_str}.pkl'))
+        del transactions_frame
+        gc.collect()
+        block += 1

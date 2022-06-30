@@ -10,23 +10,6 @@ transaction_features = ['currency', 'operation_kind', 'card_type', 'operation_ty
 
 def batches_generator(list_of_paths, batch_size=32, shuffle=False, is_infinite=False,
                       verbose=False, device=None, output_format='torch', is_train=True):
-    """
-    функция для создания батчей на вход для нейронной сети для моделей на keras и pytorch.
-    так же может использоваться как функция на стадии инференса
-    :param list_of_paths: путь до директории с предобработанными последовательностями
-    :param batch_size: размер батча
-    :param shuffle: флаг, если True, то перемешивает list_of_paths и так же
-    перемешивает последовательности внутри файла
-    :param is_infinite: флаг, если True,  то создает бесконечный генератор батчей
-    :param verbose: флаг, если True, то печатает текущий обрабатываемый файл
-    :param device: device на который положить данные, если работа на торче
-    :param output_format: допустимые варианты ['tf', 'torch']. Если 'torch', то возвращает словарь,
-    где ключи - батчи из признаков, таргетов и app_id. Если 'tf', то возвращает картеж: лист input-ов
-    для модели, и список таргетов.
-    :param is_train: флаг, Если True, то для кераса вернет (X, y), где X - input-ы в модель, а y - таргеты, 
-    если False, то в y будут app_id; для torch вернет словарь с ключами на device.
-    :return: бачт из последовательностей и таргетов (или app_id)
-    """
     while True:
         if shuffle:
             np.random.shuffle(list_of_paths)
@@ -56,8 +39,18 @@ def batches_generator(list_of_paths, batch_size=32, shuffle=False, is_infinite=F
                 if is_train:
                     target = targets[idx]
                 
+                indices = np.arange(len(product))
+                if shuffle:
+                    np.random.shuffle(indices)
+                    bucket = bucket[indices]
+                    if is_train:
+                        target = target[indices]
+                    product = product[indices]
+                    app_id = app_id[indices]
                 for jdx in range(0, len(bucket), batch_size):
                     batch_sequences = bucket[jdx: jdx + batch_size]
+                    global bs
+                    bs = batch_sequences
                     if is_train:
                         batch_targets = target[jdx: jdx + batch_size]
                     
@@ -75,7 +68,7 @@ def batches_generator(list_of_paths, batch_size=32, shuffle=False, is_infinite=F
                         else:
                              yield batch_sequences, batch_app_ids
                     else:
-                        batch_sequences = [torch.LongTensor(batch_sequences[:, i]).to(device)
+                        batch_sequences = [torch.LongTensor(np.array([app[i] for app in batch_sequences])).to(device)
                                            for i in range(len(transaction_features))]
                         if is_train:
                             yield dict(transactions_features=batch_sequences,

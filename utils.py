@@ -28,3 +28,23 @@ def read_parquet_dataset_from_local(path_to_dataset: str, start_from: int = 0,
         chunk = pd.read_parquet(chunk_path,columns=columns)
         res.append(chunk)
     return pd.concat(res).reset_index(drop=True)
+
+def df_memory_optimize(df, embedding_projections):
+    for col_name in df.columns:
+        card = embedding_projections.get(col_name, None)
+        if card is None:
+            continue
+        else:
+            card = card[0]
+        if card <= 2**8:
+            new_type = 'uint8'
+        elif card <= 2**16:
+            new_type = 'uint16'
+        elif card <= 2**32:
+            new_type = 'uint32'
+        else:
+            new_type = 'uint64'
+        df[col_name] = df[col_name].astype(new_type)
+            
+        
+    

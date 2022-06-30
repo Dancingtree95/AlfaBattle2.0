@@ -8,7 +8,7 @@ from rnn_baseline.data_generators import batches_generator
 
 
 def train_epoch(model, optimizer, dataset_train, batch_size=64, shuffle=True,
-                print_loss_every_n_batches=500, device=None):
+                print_loss_every_n_batches=500, device=None, losses = None):
     """
     делает одну эпоху обучения модели, логирует
     :param model: nn.Module модель
@@ -45,6 +45,9 @@ def train_epoch(model, optimizer, dataset_train, batch_size=64, shuffle=True,
             print(f'Training loss after {num_batches} batches: {running_loss / num_batches}', end='\r')
         
         num_batches += 1
+
+        if losses not is None:
+            losses.append(batch_loss.item())
     
     print(f'Training loss after epoch: {running_loss / num_batches}', end='\r')
     
